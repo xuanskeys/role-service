@@ -1,0 +1,5 @@
+spring:
+  application:
+    name: role-service
+  profiles:
+    active: dev

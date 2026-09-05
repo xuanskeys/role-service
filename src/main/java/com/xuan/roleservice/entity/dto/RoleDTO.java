@@ -28,7 +28,8 @@ public class RoleDTO implements Serializable {
     @Schema(description = "角色名称", requiredMode = Schema.RequiredMode.REQUIRED)
     private String roleName;
 
-    @Schema(description = "租户ID")
+    @NotNull(message = "租户ID不能为空")
+    @Schema(description = "租户ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long tenantId;
 
     @Schema(description = "角色等级（数值越大权限越高）")

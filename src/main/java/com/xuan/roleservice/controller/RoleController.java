@@ -4,6 +4,8 @@ import com.xuan.roleservice.entity.dto.RoleDTO;
 import com.xuan.roleservice.entity.model.Role;
 import com.xuan.roleservice.entity.result.Result;
 import com.xuan.roleservice.service.IRoleService;
+import com.xuan.logging.OperationLog;
+import com.xuan.logging.OperationType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -37,18 +39,21 @@ public class RoleController {
     private final IRoleService roleService;
 
     @GetMapping("/{id}")
+    @OperationLog(type = OperationType.READ, description = "查询角色")
     @Operation(summary = "根据角色ID获取角色信息")
     public Result<Role> getById(@PathVariable Long id) {
         return Result.success(roleService.getById(id));
     }
 
     @GetMapping("/type/{roleType}")
+    @OperationLog(type = OperationType.READ, description = "按类型查询角色")
     @Operation(summary = "根据角色类型编码获取角色列表")
     public Result<List<Role>> listByRoleType(@PathVariable String roleType) {
         return Result.success(roleService.listByRoleType(roleType));
     }
 
     @GetMapping("/list")
+    @OperationLog(type = OperationType.READ, description = "查询角色列表")
     @Operation(summary = "查询全部角色（未删除）")
     public Result<List<Role>> listAll() {
         return Result.success(roleService.list(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Role>()
@@ -56,26 +61,21 @@ public class RoleController {
     }
 
     @PostMapping
+    @OperationLog(type = OperationType.CREATE, description = "创建角色")
     @Operation(summary = "新增角色（同一租户下角色名称不允许重复）")
     public Result<Long> create(@Valid @RequestBody RoleDTO dto) {
-        try {
-            return Result.success(roleService.createRole(dto));
-        } catch (IllegalArgumentException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(roleService.createRole(dto));
     }
 
     @PutMapping
+    @OperationLog(type = OperationType.UPDATE, description = "修改角色")
     @Operation(summary = "编辑角色")
     public Result<Boolean> update(@Valid @RequestBody RoleDTO dto) {
-        try {
-            return Result.success(roleService.updateRole(dto));
-        } catch (IllegalArgumentException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(roleService.updateRole(dto));
     }
 
     @DeleteMapping("/{id}")
+    @OperationLog(type = OperationType.DELETE, description = "删除角色")
     @Operation(summary = "删除角色（逻辑删除）")
     public Result<Boolean> delete(@PathVariable Long id) {
         return Result.success(roleService.deleteRole(id));

@@ -9,6 +9,7 @@ import com.xuan.roleservice.mapper.UserRoleMapper;
 import com.xuan.roleservice.service.IUserRoleService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,9 +23,16 @@ import java.util.List;
  * @since 2026-09-03
  */
 @Service
+@Transactional(rollbackFor = Exception.class)
 public class UserRoleServiceImpl extends ServiceImpl<UserRoleMapper, UserRole> implements IUserRoleService {
 
     private static final int NOT_DELETED = 0;
+    private static final int DELETED = 1;
+    private static final long SYSTEM_ADMIN_USER_ID = 0L;
+    private static final long SYSTEM_ADMIN_ROLE_ID = 0L;
+    private static final long DEFAULT_ROLE_ID = 1L;
+    private static final long INTERNAL_TENANT_ID = 0L;
+    private static final long DEFAULT_TENANT_ID = 1L;
 
     private final RoleMapper roleMapper;
 
@@ -34,13 +42,32 @@ public class UserRoleServiceImpl extends ServiceImpl<UserRoleMapper, UserRole> i
 
     @Override
     public Long bindUserRole(UserRoleDTO dto) {
-        // 同一用户同一角色不重复绑定
-        Long existId = baseMapper.selectCount(new LambdaQueryWrapper<UserRole>()
+        var role = roleMapper.selectOne(new LambdaQueryWrapper<com.xuan.roleservice.entity.model.Role>()
+                .eq(com.xuan.roleservice.entity.model.Role::getId, dto.getRoleId())
+                .eq(com.xuan.roleservice.entity.model.Role::getIsDelete, NOT_DELETED));
+        if (role == null) {
+            throw new IllegalArgumentException("角色不存在：" + dto.getRoleId());
+        }
+        if (dto.getRoleId() == SYSTEM_ADMIN_ROLE_ID && dto.getUserId() != SYSTEM_ADMIN_USER_ID) {
+            throw new IllegalArgumentException("最高权限角色只允许绑定系统管理员");
+        }
+        if (dto.getRoleId() == DEFAULT_ROLE_ID && role.getTenantId() != DEFAULT_TENANT_ID) {
+            throw new IllegalStateException("默认角色必须关联 tenant_id=1");
+        }
+
+        UserRole existing = baseMapper.selectOne(new LambdaQueryWrapper<UserRole>()
                 .eq(UserRole::getUserId, dto.getUserId())
-                .eq(UserRole::getRoleId, dto.getRoleId())
-                .eq(UserRole::getIsDelete, NOT_DELETED));
-        if (existId != null && existId > 0) {
-            throw new IllegalArgumentException("该用户已绑定此角色");
+                .eq(UserRole::getRoleId, dto.getRoleId()));
+        if (existing != null) {
+            if (existing.getIsDelete() == NOT_DELETED) {
+                throw new IllegalArgumentException("该用户已绑定此角色");
+            }
+            existing.setDescription(dto.getDescription());
+            existing.setIsDelete(NOT_DELETED);
+            existing.setDeleteTime(null);
+            existing.setUpdateTime(LocalDateTime.now());
+            baseMapper.updateById(existing);
+            return existing.getId();
         }
         UserRole entity = new UserRole();
         BeanUtils.copyProperties(dto, entity);
@@ -60,30 +87,58 @@ public class UserRoleServiceImpl extends ServiceImpl<UserRoleMapper, UserRole> i
 
     @Override
     public boolean deleteUserRole(Long userId, Long roleId) {
-        return baseMapper.delete(new LambdaQueryWrapper<UserRole>()
+        assertNotReserved(userId, roleId);
+        return logicalDelete(new LambdaQueryWrapper<UserRole>()
                 .eq(UserRole::getUserId, userId)
-                .eq(UserRole::getRoleId, roleId)) > 0;
+                .eq(UserRole::getRoleId, roleId));
     }
 
     @Override
     public boolean deleteByUserId(Long userId) {
-        return baseMapper.delete(new LambdaQueryWrapper<UserRole>()
-                .eq(UserRole::getUserId, userId)) > 0;
+        assertNotReserved(userId, null);
+        return logicalDelete(new LambdaQueryWrapper<UserRole>().eq(UserRole::getUserId, userId));
     }
 
     @Override
     public boolean deleteByRoleId(Long roleId) {
-        return baseMapper.delete(new LambdaQueryWrapper<UserRole>()
-                .eq(UserRole::getRoleId, roleId)) > 0;
+        if (roleId == DEFAULT_ROLE_ID) {
+            throw new IllegalArgumentException("默认角色的全部绑定不允许批量删除");
+        }
+        assertNotReserved(null, roleId);
+        return logicalDelete(new LambdaQueryWrapper<UserRole>().eq(UserRole::getRoleId, roleId));
     }
 
     @Override
     public boolean deleteByTenantId(Long tenantId) {
+        if (tenantId == INTERNAL_TENANT_ID) {
+            throw new IllegalArgumentException("内部系统租户的角色关联不允许删除");
+        }
         List<Long> roleIds = roleMapper.selectIdsByTenantId(tenantId);
         if (roleIds == null || roleIds.isEmpty()) {
             return true;
         }
-        return baseMapper.delete(new LambdaQueryWrapper<UserRole>()
-                .in(UserRole::getRoleId, roleIds)) > 0;
+        return logicalDelete(new LambdaQueryWrapper<UserRole>().in(UserRole::getRoleId, roleIds));
+    }
+
+    private boolean logicalDelete(LambdaQueryWrapper<UserRole> wrapper) {
+        List<UserRole> rows = baseMapper.selectList(wrapper.eq(UserRole::getIsDelete, NOT_DELETED));
+        if (rows.isEmpty()) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        rows.forEach(row -> {
+            row.setIsDelete(DELETED);
+            row.setDeleteTime(now);
+            row.setUpdateTime(now);
+            baseMapper.updateById(row);
+        });
+        return true;
+    }
+
+    private void assertNotReserved(Long userId, Long roleId) {
+        if ((userId != null && userId == SYSTEM_ADMIN_USER_ID)
+                || (roleId != null && roleId == SYSTEM_ADMIN_ROLE_ID)) {
+            throw new IllegalArgumentException("系统管理员与最高权限角色的关联不允许删除");
+        }
     }
 }

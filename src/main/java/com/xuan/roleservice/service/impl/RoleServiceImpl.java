@@ -24,6 +24,9 @@ import java.util.List;
 public class RoleServiceImpl extends ServiceImpl<RoleMapper, Role> implements IRoleService {
 
     private static final int NOT_DELETED = 0;
+    private static final long SYSTEM_ADMIN_ROLE_ID = 0L;
+    private static final long DEFAULT_ROLE_ID = 1L;
+    private static final long INTERNAL_TENANT_ID = 0L;
 
     @Override
     public Role getById(Long id) {
@@ -39,12 +42,17 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, Role> implements IR
 
     @Override
     public Long createRole(RoleDTO dto) {
+        if (dto.getTenantId() == INTERNAL_TENANT_ID) {
+            throw new IllegalArgumentException("tenant_id=0 的角色只能由数据库初始化脚本创建");
+        }
         // 同一租户下角色名称不允许重复
         if (existsRoleName(dto.getRoleName(), dto.getTenantId(), null)) {
             throw new IllegalArgumentException("角色名称已存在：" + dto.getRoleName());
         }
         Role entity = new Role();
         BeanUtils.copyProperties(dto, entity);
+        entity.setRoleType(dto.getRoleType().name());
+        entity.setRoleLevel(dto.getRoleLevel() != null ? dto.getRoleLevel() : dto.getRoleType().getRoleLevel());
         entity.setIsDelete(NOT_DELETED);
         entity.setCreateTime(LocalDateTime.now());
         entity.setUpdateTime(LocalDateTime.now());
@@ -57,6 +65,12 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, Role> implements IR
         if (dto.getId() == null) {
             throw new IllegalArgumentException("编辑角色时角色ID不能为空");
         }
+        if (dto.getId() == SYSTEM_ADMIN_ROLE_ID || dto.getId() == DEFAULT_ROLE_ID) {
+            throw new IllegalArgumentException("系统保留角色不允许修改");
+        }
+        if (dto.getTenantId() == INTERNAL_TENANT_ID) {
+            throw new IllegalArgumentException("tenant_id=0 仅供内部系统使用");
+        }
         Role exist = baseMapper.selectOne(new LambdaQueryWrapper<Role>()
                 .eq(Role::getId, dto.getId())
                 .eq(Role::getIsDelete, NOT_DELETED));
@@ -68,12 +82,19 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, Role> implements IR
             throw new IllegalArgumentException("角色名称已存在：" + dto.getRoleName());
         }
         BeanUtils.copyProperties(dto, exist);
+        exist.setRoleType(dto.getRoleType().name());
+        if (dto.getRoleLevel() == null) {
+            exist.setRoleLevel(dto.getRoleType().getRoleLevel());
+        }
         exist.setUpdateTime(LocalDateTime.now());
         return baseMapper.updateById(exist) > 0;
     }
 
     @Override
     public boolean deleteRole(Long id) {
+        if (id == SYSTEM_ADMIN_ROLE_ID || id == DEFAULT_ROLE_ID) {
+            throw new IllegalArgumentException("系统保留角色不允许删除");
+        }
         Role exist = baseMapper.selectOne(new LambdaQueryWrapper<Role>()
                 .eq(Role::getId, id)
                 .eq(Role::getIsDelete, NOT_DELETED));
